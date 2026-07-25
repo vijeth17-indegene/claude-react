@@ -1,15 +1,20 @@
+import { useState } from 'react';
+
 interface UserCardProps {
 name: string;
 role: string;
-isOnline: boolean
+// isOnline: boolean;
 }
 
-function UserCard({name, role, isOnline} : UserCardProps) {
+function UserCard({name, role} : UserCardProps) {
+    const [isOnline, setIsOnline] =  useState(false);
+
     return(
         <div className="user-card">
-            <h1>{name}</h1>
-            <h2>{role}</h2>
-            <div>{isOnline ? <span className="green-circle"></span> : <span className="red-circle"></span>}</div>
+            <p>{name}</p>
+            <p>{role}</p>
+            {isOnline ? <span className="green-circle"></span> : <span className="red-circle"></span>}
+            <button onClick={() => setIsOnline(!isOnline)}>Toggle Status</button>
         </div>
     );
 }

@@ -3,14 +3,16 @@ import UserCard from "./components/UserCard";
 function App() {
 
   const users = [
-    { name: "ABC", role: "Designer", isOnline: true},
-    { name: "DEF", role: "Engineer", isOnline: false}
+    { name: "ABC", role: "Designer"},
+    { name: "DEF", role: "Engineer"},
+    { name: "GHI", role: "Engineer"},
+    { name: "DEF", role: "Engineer"},
   ];
   return (
     <div className="container">
       <div className="user-card-wrapper"> 
-        {users.map((user) => (
-          <UserCard key={user.name} name={user.name} role={user.role} isOnline={user.isOnline} />
+        {users.map((user, index) => (
+          <UserCard key={index} {...user} />
         ))}
       </div>
     </div>
