@@ -1,507 +1,357 @@
-# `useState` — A Practical Guide
+# useState
 
-A deep-dive covering how `useState` is used across this workspace ([TitleCounter.tsx](../src/components/TitleCounter.tsx), [LiveClock.tsx](../src/components/LiveClock.tsx), [ExpenseForm.tsx](../../02-expense-tracker/src/components/ExpenseForm.tsx), [App.tsx](../../02-expense-tracker/src/App.tsx)), the difference between direct and functional updates, and the bugs that appear when you get them wrong.
+## What is `useState`?
 
----
+`useState` is a React hook that lets a component **remember a value between renders**. Updating that value triggers a re-render with the new value.
 
-## Table of contents
-
-1. [What `useState` is for](#what-usestate-is-for)
-2. [Anatomy of the hook](#anatomy-of-the-hook)
-3. [Initial state — eager vs lazy](#initial-state--eager-vs-lazy)
-4. [The setter — direct vs functional updates](#the-setter--direct-vs-functional-updates)
-5. [State is a snapshot, not a live variable](#state-is-a-snapshot-not-a-live-variable)
-6. [Case study 1 — `TitleCounter` (primitive state)](#case-study-1--titlecounter-primitive-state)
-7. [Case study 2 — `LiveClock` (object state)](#case-study-2--liveclock-object-state)
-8. [Case study 3 — `ExpenseForm` (multiple pieces of state)](#case-study-3--expenseform-multiple-pieces-of-state)
-9. [Case study 4 — `App` (array state + derived state)](#case-study-4--app-array-state--derived-state)
-10. [Bug lab — what breaks when you get it wrong](#bug-lab--what-breaks-when-you-get-it-wrong)
-11. [Batching (React 18+)](#batching-react-18)
-12. [Rules of thumb](#rules-of-thumb)
-
----
-
-## What `useState` is for
-
-Components need to **remember** things between renders — a counter's current value, the text a user typed, whether a menu is open. Plain variables can't do this; they're recreated every time the function runs.
-
-`useState` gives a component a private, per-instance memory slot that:
-
-- Survives re-renders.
-- Triggers a re-render when it changes.
-- Is scoped to *this specific instance* of the component (two `<TitleCounter />`s each have their own count).
-
-> Think of `useState` as: *"Give me a value I can remember, and a function that both updates it and asks React to re-render."*
-
----
-
-## Anatomy of the hook
-
-```tsx
-const [value, setValue] = useState<T>(initialValue);
-//     ^^^^^  ^^^^^^^^                ^^^^^^^^^^^^
-//     |      |                       used only on the first render
-//     |      updater function — call to change value and re-render
-//     current value for this render
+```ts
+const [state, setState] = useState(initialValue);
 ```
 
-- **`value`** — the state as of this render. It is a **constant** inside this render; setting it does not mutate this variable.
-- **`setValue`** — the updater. Two calling styles:
-  - **Direct:** `setValue(next)` — replaces state with `next`.
-  - **Functional:** `setValue((prev) => next)` — receives the latest queued value and returns the next one.
-- **`initialValue`** — used only on the component's **first render**. Ignored on every subsequent render.
-- **`<T>`** — the TypeScript type. React usually infers it from `initialValue`, but you can be explicit: `useState<Expense[]>([])`.
+| Parameter      | Description                                                          |
+|----------------|----------------------------------------------------------------------|
+| `initialValue` | The starting value. Used only on the first render.                   |
+| `state`        | The current value for this render.                                   |
+| `setState`     | A function to update the value and trigger a re-render.              |
 
 ---
 
-## Initial state — eager vs lazy
+## When to use `useState` vs `useReducer`
 
-### Eager (the common case)
-
-```tsx
-const [count, setCount] = useState<number>(0);
-```
-
-The value `0` is evaluated on every render but only *used* on the first one. Fine for cheap values (numbers, strings, `[]`, `{}`).
-
-### Lazy (for expensive initializers)
-
-```tsx
-const [items, setItems] = useState<Item[]>(() => parseLargeJSON(localStorage.getItem("items")));
-```
-
-Passing a **function** tells React: *"only call this on the first render."* Without the wrapper, `parseLargeJSON` would run on every render — wasted CPU.
-
-**Rule:** if computing the initial value is expensive (parsing, cloning a big object, `localStorage` access), wrap it in a function.
+| Situation                                      | Use          |
+|------------------------------------------------|--------------|
+| Simple, independent values                     | `useState`   |
+| A single boolean, number, or string            | `useState`   |
+| A controlled input value                       | `useState`   |
+| Multiple related values in one object          | `useReducer` |
+| Multiple actions affect the same state         | `useReducer` |
+| Logic is complex enough to benefit from tests  | `useReducer` |
 
 ---
 
-## The setter — direct vs functional updates
+## Core Concepts
 
-### Direct: `setCount(5)`
+### 1. Initial value
+The value used on the **first render only**. On every later render, `useState` returns the current value, not this one.
 
-Use when the next value **doesn't depend** on the current one.
-
-```tsx
-setName("Alice");        // replace with a known value
-setErrors({});           // reset
-setCategory("Food");     // pick from an enum
+```ts
+const [count, setCount] = useState(0);        // number
+const [name, setName]   = useState("");       // string
+const [open, setOpen]   = useState(false);    // boolean
+const [items, setItems] = useState<number[]>([]); // typed array
 ```
 
-### Functional: `setCount((c) => c + 1)`
+> If computing the initial value is expensive, pass a **function**: `useState(() => heavyCompute())`. React will call it only on the first render.
 
-Use when the next value **depends** on the current one, especially when multiple updates might queue.
+### 2. The setter — direct update
+Use when the next value **does not depend** on the current one.
 
-```tsx
+```ts
+setCount(0);
+setName("Alice");
+setOpen(true);
+```
+
+### 3. The setter — functional update
+Use when the next value **depends on the previous one**. The setter passes you the latest value.
+
+```ts
 setCount((c) => c + 1);
-setExpenses((prev) => [...prev, newExpense]);
-setExpenses((prev) => prev.filter((e) => e.id !== id));
+setItems((prev) => [...prev, newItem]);
+setItems((prev) => prev.filter((x) => x !== target));
 ```
 
-### Why functional is safer
+> Without the functional form, multiple updates in the same event can lose intermediate values because they all read the same stale `count`.
 
-React batches state updates. If you write:
+### 4. State is a snapshot
+Inside one render, `state` is a **constant**. Calling `setState` doesn't change it here — it schedules a new render where the value will be updated.
 
-```tsx
-setCount(count + 1);
-setCount(count + 1);
-setCount(count + 1);
-```
-
-…all three see the **same** captured `count` (say, `0`) and all queue `setCount(1)`. Result: `1`, not `3`.
-
-With the functional form:
-
-```tsx
-setCount((c) => c + 1);
-setCount((c) => c + 1);
-setCount((c) => c + 1);
-```
-
-Each function receives the pending value from the queue: `0 → 1`, `1 → 2`, `2 → 3`. Result: `3`.
-
-This is exactly the pattern used in [TitleCounter.tsx](../src/components/TitleCounter.tsx#L14):
-
-```tsx
-<button onClick={() => setCount((c) => c + 1)}>Increment</button>
-```
-
-…and in [App.tsx](../../02-expense-tracker/src/App.tsx#L15):
-
-```tsx
-setExpenses((prevExpenses) => [...prevExpenses, expense]);
-```
-
----
-
-## State is a snapshot, not a live variable
-
-This is the mental model that trips up most beginners.
-
-```tsx
-function Counter() {
-    const [count, setCount] = useState(0);
-
-    function handleClick() {
-        setCount(count + 1);
-        console.log(count);          // logs the OLD value — still 0
-        setCount(count + 1);         // still uses 0, queues 1 again
-    }
-
-    return <button onClick={handleClick}>{count}</button>;
+```ts
+function handleClick() {
+  setCount(count + 1);
+  console.log(count);   // still the old value in THIS render
 }
 ```
 
-Inside `handleClick`, `count` is the value **captured when this render happened**. Calling `setCount` doesn't change `count` in the current function scope — it schedules a **new render** where `count` will have the new value.
+### 5. State must be treated as immutable
+Never mutate arrays or objects held in state. Always produce a new value.
 
-Each render sees its own frozen copy of state. If you need to react to the new value in the same handler, use a local variable:
+```ts
+// ❌ mutation — React sees the same reference and may skip re-render
+items.push(newItem);
+setItems(items);
 
-```tsx
-const next = count + 1;
-setCount(next);
-console.log(next);   // ✅ current logic sees the new value
+// ✅ new array
+setItems([...items, newItem]);
+
+// ✅ new object
+setUser({ ...user, name: "Bob" });
 ```
-
-Or use the functional updater and put the work in a `useEffect` that depends on the state.
 
 ---
 
-## Case study 1 — `TitleCounter` (primitive state)
+## Full Example — Counter (number)
 
 ```tsx
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-export default function TitleCounter() {
-    const [count, setCount] = useState<number>(0);
+export default function Counter() {
+  const [count, setCount] = useState<number>(0);
 
-    useEffect(() => {
-        document.title = `Count: ${count}`;
-    }, [count]);
-
-    return (
-        <>
-            <p>Count: {count}</p>
-            <button onClick={() => setCount((c) => c + 1)}>Increment</button>
-        </>
-    );
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount((c) => c + 1)}>+</button>
+      <button onClick={() => setCount((c) => c - 1)}>-</button>
+      <button onClick={() => setCount(0)}>Reset</button>
+    </div>
+  );
 }
 ```
 
-### Why `useState<number>(0)`?
-
-`0` is the starting count. `<number>` is optional (TypeScript would infer it) but makes intent explicit.
-
-### Why `setCount((c) => c + 1)` and not `setCount(count + 1)`?
-
-Both work here because the button is clicked one event at a time. But the functional form is a habit worth keeping — if you later add a "+3" button that calls the setter three times, only the functional form gives you `count + 3`.
-
-### Why does `count` appear in `useEffect`'s deps?
-
-The effect **reads** `count`. Any reactive value read inside an effect must appear in its dependency array — otherwise the effect captures a stale value and the title stops updating. See the [`useEffect` guide](./useEffect.md#bug-3--missing-dependency-in-titlecounter).
+> `+` and `-` use the functional form because the next count depends on the previous one. `Reset` uses the direct form because `0` doesn't depend on the current count.
 
 ---
 
-## Case study 2 — `LiveClock` (object state)
+## Full Example — Toggle (boolean)
 
 ```tsx
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-export default function LiveClock() {
-    const [time, setTime] = useState<Date>(new Date());
+export default function Toggle() {
+  const [on, setOn] = useState<boolean>(false);
 
-    useEffect(() => {
-        const intervalId = setInterval(() => {
-            setTime(new Date());
-        }, 1000);
-
-        return () => clearInterval(intervalId);
-    }, []);
-
-    return <h2>{time.toLocaleTimeString()}</h2>;
+  return (
+    <button onClick={() => setOn((prev) => !prev)}>
+      {on ? "ON" : "OFF"}
+    </button>
+  );
 }
 ```
 
-### Why `new Date()` as the initial value?
-
-We want the clock to show *some* time on the first paint, before the first interval tick fires. `new Date()` gives us "now."
-
-### Why does this not need the lazy form (`() => new Date()`)?
-
-Constructing a `Date` is trivially cheap. Lazy init is for expensive work (parsing large data, reading `localStorage`, etc.).
-
-### Why doesn't the setter need the functional form here?
-
-`setTime(new Date())` doesn't read the previous `time` — it replaces it with a freshly constructed value. There's no dependency on prior state, so `setTime((prev) => new Date())` would just be noise.
-
-### Why isn't `time` in the `useEffect` deps?
-
-The effect doesn't **read** `time` — it only calls `setTime` with a value derived from `new Date()`. Setters are stable (React guarantees the identity of `setTime` never changes), so they don't belong in deps either.
+> `setOn((prev) => !prev)` flips the current value — a textbook case for the functional updater.
 
 ---
 
-## Case study 3 — `ExpenseForm` (multiple pieces of state)
-
-From [ExpenseForm.tsx](../../02-expense-tracker/src/components/ExpenseForm.tsx):
+## Full Example — Controlled Text Input (string)
 
 ```tsx
-const [name, setName] = useState<string>("");
-const [amount, setAmount] = useState<string>("");
-const [category, setCategory] = useState<Category>("Food");
-const [errors, setErrors] = useState<{ name?: string; amount?: string }>({});
-```
+import { useState } from "react";
 
-### Why four `useState` calls instead of one object?
+export default function NameInput() {
+  const [name, setName] = useState<string>("");
 
-Splitting related-but-independent values into separate states is idiomatic in React because:
-
-- Each field has its own natural update pattern (a text input just calls `setName(e.target.value)`).
-- You never need to spread a whole object to update one key: no `setForm({ ...form, name: e.target.value })`.
-- Re-render granularity is finer.
-
-When *would* you group them? When the fields are always updated together, or when they naturally form a single logical unit (like a form's `errors` object above — all keys change together).
-
-### Why is `amount` a `string` and not a `number`?
-
-The `<input type="number">` DOM value is a string. Storing it as a string lets the user type `""`, `"1"`, `"1.5"`, `"1.5e"` etc. without fighting the input. Coercion to `Number(amount)` happens at submit-time.
-
-### Why `useState<Category>("Food")` — the explicit generic?
-
-`Category` is a union type (`"Food" | "Travel" | ...`). Without `<Category>`, TypeScript would infer `useState("Food")` as `useState<string>` — you'd lose the union constraint and could accidentally do `setCategory("banana")`.
-
-### Reset pattern
-
-At the end of a successful submit:
-
-```tsx
-setName("");
-setAmount("");
-setCategory("Food");
-setErrors({});
-```
-
-Each setter is called with a **direct value** (not functional) because none of the resets depend on the previous state. They all batch into a single re-render.
-
----
-
-## Case study 4 — `App` (array state + derived state)
-
-From [App.tsx](../../02-expense-tracker/src/App.tsx):
-
-```tsx
-const [expenses, setExpenses] = useState<Expense[]>([]);
-const [catFilter, setCatFilter] = useState<FilteringCategory>("All");
-
-function addExpense(expense: Expense) {
-    setExpenses((prevExpenses) => [...prevExpenses, expense]);
+  return (
+    <div>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Type your name"
+      />
+      <p>Hello, {name || "stranger"}!</p>
+    </div>
+  );
 }
-
-function deleteExpense(id: string) {
-    setExpenses((prevExpenses) => prevExpenses.filter((e) => e.id !== id));
-}
-
-const visibleExpenses = catFilter === "All"
-    ? expenses
-    : expenses.filter((e) => e.category === catFilter);
 ```
 
-### Why the spread `[...prevExpenses, expense]` instead of `prevExpenses.push(expense)`?
-
-**State must be treated as immutable.** React uses `Object.is` to compare old and new state — if you `push`, the reference is the same, and React may skip the re-render entirely. Always produce a **new array** (`[...prev, item]`, `prev.filter(...)`, `prev.map(...)`).
-
-### Why is `visibleExpenses` not stored in `useState`?
-
-Because it is **derived** — fully computable from `expenses` and `catFilter`. Storing it as state would:
-
-- Duplicate the source of truth (bug risk when they get out of sync).
-- Force an extra `useEffect` to re-sync it.
-- Cost an unnecessary re-render.
-
-**Rule:** if you can compute it from existing state or props, don't put it in `useState`. Compute it during render.
-
-### Why functional updaters for `add` and `delete`?
-
-Both reads the previous list to derive the next one. If two `addExpense` calls happened in the same tick, the direct form (`setExpenses([...expenses, e])`) would lose one — both would see the same stale `expenses`.
+> The `<input>` reads from state (`value={name}`) and writes to it (`onChange`). This is called a **controlled input**.
 
 ---
 
-## Bug lab — what breaks when you get it wrong
+## Full Example — Object State (form fields)
+
+```tsx
+import { useState } from "react";
+
+type Form = { name: string; email: string };
+
+export default function SignupForm() {
+  const [form, setForm] = useState<Form>({ name: "", email: "" });
+
+  function updateField(field: keyof Form, value: string) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  return (
+    <form>
+      <input
+        value={form.name}
+        onChange={(e) => updateField("name", e.target.value)}
+        placeholder="Name"
+      />
+      <input
+        value={form.email}
+        onChange={(e) => updateField("email", e.target.value)}
+        placeholder="Email"
+      />
+    </form>
+  );
+}
+```
+
+> `{ ...prev, [field]: value }` spreads the previous object, then overrides one key. This keeps state **immutable**.
+
+---
+
+## Full Example — Array State (todo list)
+
+```tsx
+import { useState } from "react";
+
+type Todo = { id: number; text: string };
+
+export default function TodoList() {
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [input, setInput] = useState<string>("");
+
+  function addTodo() {
+    if (!input.trim()) return;
+    setTodos((prev) => [...prev, { id: Date.now(), text: input.trim() }]);
+    setInput("");
+  }
+
+  function removeTodo(id: number) {
+    setTodos((prev) => prev.filter((t) => t.id !== id));
+  }
+
+  return (
+    <div>
+      <input value={input} onChange={(e) => setInput(e.target.value)} />
+      <button onClick={addTodo}>Add</button>
+      <ul>
+        {todos.map((t) => (
+          <li key={t.id}>
+            {t.text} <button onClick={() => removeTodo(t.id)}>✕</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+> Both updates use the functional form (`prev => ...`) and produce **new arrays** with spread and `filter` — never `push` or `splice`.
+
+---
+
+## Data Flow
+
+```
+User interaction
+      │
+      ▼
+  setState(next)
+      │
+      ▼
+ React schedules a re-render
+      │
+      ▼
+ Component runs again — useState returns the new value
+      │
+      ▼
+ DOM updates
+```
+
+---
+
+## Rules of `useState`
+
+1. **Only call at the top of the component** — never inside `if`, loops, or nested functions. Hook order must be stable.
+2. **Treat state as immutable** — always produce a new object/array; never mutate.
+3. **Use the functional updater when the next value depends on the previous** — `setX((prev) => …)`.
+4. **Don't store what you can derive** — compute during render instead of adding another `useState`.
+5. **Wrap expensive initial values in a function** — `useState(() => compute())` runs only on the first render.
+6. **Setter is stable** — its identity never changes, so it doesn't need to appear in `useEffect` deps.
+
+---
+
+## Common Bugs
 
 ### Bug 1 — Mutating state directly
 
 ```tsx
-const [expenses, setExpenses] = useState<Expense[]>([]);
-
-function addExpense(e: Expense) {
-    expenses.push(e);          // ❌ mutates the existing array
-    setExpenses(expenses);     // ❌ same reference — React sees no change
-}
+const [items, setItems] = useState<number[]>([]);
+items.push(1);          // ❌ mutation
+setItems(items);        // same reference → React may skip re-render
 ```
+**Fix:** `setItems((prev) => [...prev, 1]);`
 
-**What happens:**
-
-- The list appears not to update.
-- Sometimes it *does* update (when another state change forces a re-render), which is worse — intermittent bugs.
-
-**Fix:** produce a new array with the spread or a non-mutating method (`filter`, `map`, `slice`, `concat`).
+### Bug 2 — Stale value in a queued update
 
 ```tsx
-setExpenses((prev) => [...prev, e]);
+setCount(count + 1);
+setCount(count + 1);
+setCount(count + 1);    // ❌ all three see the same old count → final result is +1
 ```
-
-The same rule applies to objects: `setUser({ ...user, name: "Alice" })`, never `user.name = "Alice"`.
-
-### Bug 2 — Stale closure in async handlers
-
+**Fix:** functional form, so each call reads the pending value.
 ```tsx
-function handleClick() {
-    setTimeout(() => {
-        setCount(count + 1);   // ❌ `count` is captured from THIS render
-    }, 1000);
-}
-```
-
-If the user clicks three times quickly, all three timeouts capture the same `count` (say, `0`) and all queue `setCount(1)`. Result after 1s: `1`, not `3`.
-
-**Fix:** functional updater.
-
-```tsx
-setTimeout(() => {
-    setCount((c) => c + 1);   // ✅ reads latest queued value
-}, 1000);
+setCount((c) => c + 1);
+setCount((c) => c + 1);
+setCount((c) => c + 1); // ✅ final result is +3
 ```
 
 ### Bug 3 — Reading state right after setting it
 
 ```tsx
-function handleClick() {
-    setCount(count + 1);
-    console.log(count);           // ❌ still the old value
-    doThingBasedOn(count);        // ❌ still the old value
-}
-```
-
-`count` is a `const` in this render's scope. `setCount` doesn't retroactively change it — it schedules a new render.
-
-**Fix:** use a local variable, or the functional updater, or move the follow-up work into a `useEffect` that depends on `count`.
-
-```tsx
-const next = count + 1;
-setCount(next);
-doThingBasedOn(next);           // ✅
-```
-
-### Bug 4 — Calling the initializer non-lazily on every render
-
-```tsx
-const [items, setItems] = useState(parseHugeJSON(localStorage.getItem("items")));
-// ❌ runs on every render; result is thrown away after the first
-```
-
-**Fix:** wrap in a function.
-
-```tsx
-const [items, setItems] = useState(() => parseHugeJSON(localStorage.getItem("items")));
-```
-
-### Bug 5 — Treating state like a live database
-
-```tsx
 setCount(count + 1);
-if (count === 5) {          // ❌ still the old count
-    doSomething();
-}
+console.log(count);     // ❌ still the old value
 ```
+`count` is a constant inside this render. The new value only exists in the **next** render.
+**Fix:** use a local variable, or react to the change in a `useEffect`.
 
-State updates are queued. The comparison sees the pre-update value. Use the next value directly, or a `useEffect` keyed on `count`.
-
-### Bug 6 — Storing derived data in state
+### Bug 4 — Storing derived data in state
 
 ```tsx
-const [expenses, setExpenses] = useState<Expense[]>([]);
-const [total, setTotal] = useState<number>(0);   // ❌ derivable
+const [items, setItems] = useState<number[]>([]);
+const [count, setCount] = useState<number>(0);   // ❌ can be derived
 
-useEffect(() => {
-    setTotal(expenses.reduce((s, e) => s + e.amount, 0));
-}, [expenses]);
+useEffect(() => { setCount(items.length); }, [items]);
 ```
-
-**What happens:**
-
-- Two sources of truth. If you ever `setTotal` without touching `expenses`, they drift out of sync.
-- An extra render every time `expenses` changes (state → effect → state → render).
-
-**Fix:** compute during render.
-
+**Fix:** compute in render.
 ```tsx
-const total = expenses.reduce((s, e) => s + e.amount, 0);
+const count = items.length;
 ```
 
-### Bug 7 — Conditional or looped hook calls
+### Bug 5 — Calling a hook conditionally
 
 ```tsx
 if (loggedIn) {
-    const [name, setName] = useState("");   // ❌ breaks the Rules of Hooks
+  const [name, setName] = useState("");   // ❌ Rules of Hooks violation
 }
 ```
-
-React identifies each `useState` call by its **call order**, not by a name. Skipping or reordering hook calls corrupts the internal state list, and you'll see: *"Rendered fewer hooks than expected."*
-
-**Fix:** always call the same hooks in the same order. Push conditionals *inside* the hook or into the JSX.
+React tracks hooks by call order. Skipping one breaks all following hooks.
+**Fix:** call the hook unconditionally at the top of the component.
 
 ---
 
-## Batching (React 18+)
+## `useState` vs `useReducer` — Code Comparison
 
-React 18 batches **all** state updates from the same event tick — synchronous handlers, promises, timeouts, native event listeners — into a single re-render.
-
+**Counter with `useState`:**
 ```tsx
-function handleSubmit() {
-    setName("");           // ┐
-    setAmount("");         // ├─ one re-render, not four
-    setCategory("Food");   // │
-    setErrors({});         // ┘
-}
+const [count, setCount] = useState(0);
+
+<button onClick={() => setCount((c) => c + 1)}>+</button>
 ```
 
-This is why the reset block in `ExpenseForm` is cheap.
-
-If you *need* to opt out of batching (rare), use `flushSync` from `react-dom`:
-
+**Same counter with `useReducer`:**
 ```tsx
-import { flushSync } from "react-dom";
+const [state, dispatch] = useReducer(reducer, { count: 0 });
 
-flushSync(() => setCount(count + 1));
-// DOM is now updated; you can read layout, then continue
-setOther(true);
+<button onClick={() => dispatch({ type: "increment" })}>+</button>
 ```
 
-Almost never needed.
+> `useState` keeps things simple when the update logic fits in one line. Reach for `useReducer` once several actions share the same state.
 
 ---
 
-## Rules of thumb
+## Quick Reference
 
-1. **Never mutate state — always produce a new value.** Use spread, `filter`, `map` for arrays; object spread for objects.
-2. **Use the functional updater whenever the next value depends on the previous one.** `setX((prev) => …)`.
-3. **Split unrelated values into separate `useState` calls.** Group only what genuinely changes together.
-4. **Don't store what you can derive.** Compute during render.
-5. **Wrap expensive initializers in a function** so they run once, not every render.
-6. **Treat state as a per-render snapshot.** `count` inside a handler is the value from *this* render, not the latest.
-7. **Type the generic when the inferred type would be too wide** (unions, empty arrays, empty objects).
-8. **Never call hooks conditionally or in loops.** Same order, every render.
-
----
-
-## Quick reference table
-
-| Scenario | Pattern |
-|---|---|
-| Counter / toggle | `useState(0)` / `useState(false)`, functional updater |
-| Controlled text input | `useState("")`, `onChange={(e) => setName(e.target.value)}` |
-| Enum / union field | `useState<Category>("Food")` — explicit generic |
-| List of items | `useState<Item[]>([])`, update with `[...prev, item]` / `.filter` / `.map` |
-| Object with several keys | `useState<T>({...})`, update with `{ ...prev, key: next }` |
-| Derived value | **Not** state — compute in render |
-| Expensive initial value | `useState(() => compute())` — lazy form |
-| Multiple queued updates | `setX((prev) => next)` — functional |
-| Reading value after setting | Local variable, or `useEffect` on the state |
+| Scenario                          | Initial value           | Update pattern                              |
+|-----------------------------------|-------------------------|---------------------------------------------|
+| Counter / toggle                  | `0` / `false`           | `setX((prev) => next)`                      |
+| Text input                        | `""`                    | `setX(e.target.value)`                      |
+| Enum / union                      | one of the union values | `setX(value as Category)`                   |
+| List of items                     | `[]`                    | `[...prev, item]` / `prev.filter(...)`      |
+| Object with several keys          | `{}` or `{...}`         | `{ ...prev, key: value }`                   |
+| Expensive initial value           | `() => compute()`       | as usual                                    |
+| Derived value                     | **not state**           | compute during render                       |
