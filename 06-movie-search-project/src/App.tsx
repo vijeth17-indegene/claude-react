@@ -20,7 +20,7 @@ export default function App() {
     if (error) return <p>Error: {error}</p>;
     if (!data) return null;
     if (data.Response === 'False') return <p>No Movies Found</p>;
-    return <MovieGrid movies = {data.Search} />;
+    return <MovieGrid movies = {data.Search}  />;
   }
 
   return(
