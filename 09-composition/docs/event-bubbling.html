@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <section id="outer">
+        <div id="middle">
+            <button id="inner">Click me</button>
+        </div>
+    </section>
+
+    <script>
+
+        // Event Bubbling : By default, event listeners fire during the bubbling phase.
+        // the event travels back up from the target to the root.
+
+        // document.getElementById("outer").addEventListener("click", ()=> console.log("outer"));
+        // document.getElementById("middle").addEventListener("click", ()=> console.log("middle"));
+        // document.getElementById("inner").addEventListener("click", ()=> console.log("inner"));
+
+        //Event Capturing
+        //Capturing is the opposite direction: outer → inner. You have to explicitly ask for it by passing true (or { capture: true }) as the third argument to addEventListener.
+
+        document.getElementById("outer").addEventListener("click", ()=> console.log("outer"), true);
+        document.getElementById("middle").addEventListener("click", ()=> console.log("middle"), true);
+        document.getElementById("inner").addEventListener("click", ()=> console.log("inner"), true);
+
+    </script>
+</body>
+</html>
