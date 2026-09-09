@@ -33,3 +33,7 @@ export default function useDebounce<T>(value: T, delay: number): T {
 //also explain useEffect and clearTimeout used in this fucntion in simple terms
 //`useEffect` is a React hook that allows you to perform side effects in your components. In this case, it's used to set up a timer (using `setTimeout`) that will update the debounced value after a specified delay. The effect runs whenever the `value` or `delay` changes, ensuring that the debounced value is always based on the latest input.
 //`clearTimeout` is used to cancel the previous timer whenever the effect re-runs or the component unmounts. This prevents multiple timers from running simultaneously and ensures that only the latest value is used for debouncing.
+
+
+// useDebounce<T>(value: T, delay: number): T 
+//T is a generic type parameter that allows the `useDebounce` function to work with any type of value. It means that the function can accept a value of any type (e.g., string, number, object) and will return a debounced version of that same type. This makes the hook flexible and reusable for different scenarios where you might want to debounce various types of input values.
